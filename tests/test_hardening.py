@@ -151,6 +151,16 @@ def test_ui_rejects_log_paths_outside_allowed_dirs() -> None:
     assert client.post("/api/runs", json={"log_path": "samples/missing.log"}).status_code == 400
 
 
+def test_ui_serves_agent_office_script() -> None:
+    client = TestClient(create_app(AppConfig()))
+    page = client.get("/")
+    script = client.get("/static/office.js")
+    assert 'id="officeCanvas"' in page.text
+    assert script.status_code == 200
+    assert "javascript" in script.headers["content-type"]
+    assert "SecGuardOffice" in script.text
+
+
 def test_ui_rejects_malformed_run_ids() -> None:
     client = TestClient(create_app(AppConfig()))
     assert client.get("/api/runs/..%5C..%5Cconfig").status_code == 404

@@ -20,7 +20,8 @@ from secguard.agents.models import AgentEvent, AgentRunState
 from secguard.agents.orchestrator import MultiAgentOrchestrator
 from secguard.config import AppConfig, load_config
 
-_STATIC_INDEX = Path(__file__).with_name("static") / "index.html"
+_STATIC_DIR = Path(__file__).with_name("static")
+_STATIC_INDEX = _STATIC_DIR / "index.html"
 _RUN_ID_RE = re.compile(r"RUN-[0-9A-Za-z-]{1,64}")
 
 
@@ -82,6 +83,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         if not _STATIC_INDEX.exists():
             raise HTTPException(status_code=404, detail="UI index.html missing")
         return HTMLResponse(_STATIC_INDEX.read_text(encoding="utf-8"))
+
+    @app.get("/static/office.js")
+    def office_js() -> FileResponse:
+        return FileResponse(_STATIC_DIR / "office.js", media_type="text/javascript; charset=utf-8")
 
     @app.get("/api/agents")
     def get_agents() -> dict[str, Any]:
