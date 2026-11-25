@@ -161,6 +161,13 @@
       border-radius: 6px; color: var(--blue); text-decoration: none; font-size: 0.8rem;
     }
     .report-links a:hover { border-color: var(--blue); }
+    /* Agent office canvas */
+    canvas.office {
+      display: block; width: 100%; height: auto; max-width: 1280px; margin: 0 auto;
+      image-rendering: pixelated; border-radius: 8px; border: 1px solid var(--border); background: #05070d;
+    }
+    button.ghost { cursor: pointer; }
+    button.ghost:hover { border-color: var(--blue); }
     @media (max-width: 1050px) {
       .agents-grid { grid-template-columns: repeat(2, 1fr); }
       .kanban, .bottom-grid { grid-template-columns: 1fr; }
@@ -187,10 +194,19 @@
       </select>
       <input id="modelInput" value="Gemma4:12b" size="18" title="Ollama Model" />
       <button class="primary" id="runBtn">Run Hermes Agents</button>
+      <button class="ghost" id="demoBtn" title="Play a scripted run (no Ollama/Hermes needed)">&#9654; Demo</button>
     </div>
   </header>
 
   <main>
+    <section class="panel">
+      <div class="panel-title">
+        <span>Agent Office &mdash; live view</span>
+        <span class="subtitle">Each figure walks to its station and acts out its task as the run progresses</span>
+      </div>
+      <canvas id="officeCanvas" class="office" aria-label="Animated view of the SecGuard agents working"></canvas>
+    </section>
+
     <section class="panel">
       <div class="panel-title">
         <span>Live Multi-Agent Topology</span>
@@ -286,6 +302,7 @@
     </section>
   </main>
 
+  <script src="/static/office.js"></script>
   <script>
     const els = {
       sampleSelect: document.getElementById('sampleSelect'),
@@ -326,6 +343,7 @@
     }
 
     function renderState(state) {
+      if (window.SecGuardOffice) SecGuardOffice.update(state);
       els.runBanner.textContent = `${state.run_id} | ${state.backend.toUpperCase()} (${state.model}) | ${state.status.toUpperCase()}`;
       els.ollamaHubSub.textContent = `Wrapped by Hermes Agent Profiles (${state.model})`;
 
@@ -490,6 +508,13 @@
       watchRun(run_id);
     });
 
+    document.getElementById('demoBtn').addEventListener('click', () => {
+      if (currentSource) { currentSource.close(); currentSource = null; }
+      els.historySelect.value = '';
+      SecGuardOffice.playDemo(renderState);
+    });
+
+    SecGuardOffice.mount(document.getElementById('officeCanvas'));
     bootstrap();
   </script>
 </body>
