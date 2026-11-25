@@ -59,12 +59,19 @@ class HermesConfig(BaseModel):
     runs_dir: str = "reports/agent_runs"
 
 
+class UiConfig(BaseModel):
+    # Directories the web UI may read log files from. Requests for any other path are rejected,
+    # so the API cannot be used to read arbitrary files (e.g. /etc/shadow) into reports.
+    allowed_log_dirs: list[str] = Field(default_factory=lambda: ["samples"])
+
+
 class AppConfig(BaseModel):
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
     detection: DetectionConfig = Field(default_factory=DetectionConfig)
     sanitizer: SanitizerConfig = Field(default_factory=SanitizerConfig)
     rag: RagConfig = Field(default_factory=RagConfig)
     hermes: HermesConfig = Field(default_factory=HermesConfig)
+    ui: UiConfig = Field(default_factory=UiConfig)
 
 
 def load_config(config_path: Path | None = None) -> AppConfig:

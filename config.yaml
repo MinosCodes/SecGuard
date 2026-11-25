@@ -30,6 +30,11 @@ rag:
   top_k: 4
   cache_path: ".cache/mitre_kb_embeddings.json"
 
+ui:
+  # Folders the web UI is allowed to read log files from (anything else is rejected).
+  allowed_log_dirs:
+    - "samples"
+
 hermes:
   enabled: true
   executable: "hermes"

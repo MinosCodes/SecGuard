@@ -60,7 +60,8 @@ _HIGH_RISK_CMD_PATTERNS: list[tuple[re.Pattern[str], str, list[str], Severity]] 
 _ACCOUNT_PERSISTENCE_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\buseradd\b", re.IGNORECASE),
     re.compile(r"\busermod\b.*\b(?:sudo|wheel|adm|root)\b", re.IGNORECASE),
-    re.compile(r"\bpasswd\b", re.IGNORECASE),
+    # Match the passwd *command* (incl. /usr/bin/passwd), not the /etc/passwd file -- reading it is routine.
+    re.compile(r"(?<!/etc/)(?<![\w.-])passwd\b", re.IGNORECASE),
 ]
 
 _PROMPT_INJECTION_PATTERNS: list[re.Pattern[str]] = [
@@ -75,6 +76,31 @@ _PROMPT_INJECTION_PATTERNS: list[re.Pattern[str]] = [
 
 def _normalize_for_injection(text: str) -> str:
     return re.sub(r"[_\-\.\s]+", " ", text).strip()
+
+
+def _split_bursts(events: list[LogEvent], gap: timedelta) -> list[list[LogEvent]]:
+    """Split time-sorted events into bursts wherever consecutive events are more than `gap` apart."""
+    bursts: list[list[LogEvent]] = []
+    current: list[LogEvent] = []
+    for ev in events:
+        if current and ev.timestamp - current[-1].timestamp > gap:
+            bursts.append(current)
+            current = []
+        current.append(ev)
+    if current:
+        bursts.append(current)
+    return bursts
+
+
+def _max_events_in_window(events: list[LogEvent], window: timedelta) -> int:
+    """Largest number of time-sorted events that fall inside any sliding window of length `window`."""
+    best = 0
+    start = 0
+    for end, ev in enumerate(events):
+        while ev.timestamp - events[start].timestamp > window:
+            start += 1
+        best = max(best, end - start + 1)
+    return best
 
 
 def _next_id(counter: list[int]) -> str:
@@ -102,20 +128,11 @@ def detect_rule_alerts(events: list[LogEvent], config: DetectionConfig) -> list[
         failures = [e for e in ip_events if e.event_type in _SSH_FAILURE_TYPES]
         successes = [e for e in ip_events if e.event_type == "ssh_accepted"]
 
-        if len(failures) >= config.ssh_brute_force_threshold:
-            # Sliding window check
-            start_idx = 0
-            burst: list[LogEvent] = []
-            for end_idx, ev in enumerate(failures):
-                while ev.timestamp - failures[start_idx].timestamp > window:
-                    start_idx += 1
-                if end_idx - start_idx + 1 >= config.ssh_brute_force_threshold:
-                    burst = failures[start_idx : end_idx + 1]
-                    break
-            if burst:
-                # Expand to all failures from this IP within continuous window
-                burst = failures
-                users = sorted({e.user for e in burst if e.user})
+        # Split this IP's failures into separate bursts (activity separated by more than the
+        # detection window), so attacks days apart become separate alerts with accurate timeframes.
+        for burst in _split_bursts(failures, window):
+            users = sorted({e.user for e in burst if e.user})
+            if _max_events_in_window(burst, window) >= config.ssh_brute_force_threshold:
                 alerts.append(
                     Alert(
                         id=_next_id(counter),
@@ -135,25 +152,26 @@ def detect_rule_alerts(events: list[LogEvent], config: DetectionConfig) -> list[
                     )
                 )
 
-                distinct_users = {e.user for e in burst if e.user}
-                if len(distinct_users) >= config.ssh_spray_user_threshold:
-                    alerts.append(
-                        Alert(
-                            id=_next_id(counter),
-                            detector="rule",
-                            rule_id="SSH_PASSWORD_SPRAY",
-                            title=f"SSH password spraying / user enumeration from {ip}",
-                            severity=Severity.HIGH,
-                            confidence=0.90,
-                            mitre_techniques=["T1110.003"],
-                            start_time=burst[0].timestamp,
-                            end_time=burst[-1].timestamp,
-                            src_ip=ip,
-                            event_count=len(burst),
-                            summary=f"Source IP {ip} targeted {len(distinct_users)} distinct usernames ({', '.join(sorted(distinct_users)[:6])}).",
-                            evidence=[e.raw for e in burst[:6]],
-                        )
+            # Spraying is checked on its own: a few attempts against many accounts is exactly
+            # the low-and-slow pattern that stays under the brute-force threshold.
+            if len(users) >= config.ssh_spray_user_threshold:
+                alerts.append(
+                    Alert(
+                        id=_next_id(counter),
+                        detector="rule",
+                        rule_id="SSH_PASSWORD_SPRAY",
+                        title=f"SSH password spraying / user enumeration from {ip}",
+                        severity=Severity.HIGH,
+                        confidence=0.90,
+                        mitre_techniques=["T1110.003"],
+                        start_time=burst[0].timestamp,
+                        end_time=burst[-1].timestamp,
+                        src_ip=ip,
+                        event_count=len(burst),
+                        summary=f"Source IP {ip} targeted {len(users)} distinct usernames ({', '.join(users[:6])}).",
+                        evidence=[e.raw for e in burst[:6]],
                     )
+                )
 
         # Brute-force followed by successful login
         if failures and successes:

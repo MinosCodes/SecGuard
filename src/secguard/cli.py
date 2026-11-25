@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import timedelta
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -26,6 +27,7 @@ from secguard.config import AppConfig, load_config
 from secguard.llm.ollama_client import OllamaClient
 from secguard.llm.triage import analyze_events, analyze_log_file
 from secguard.parsers.linux_logs import parse_log_lines
+from secguard.parsers.models import LogEvent
 from secguard.reporting.renderer import write_reports
 from secguard.ui import create_app
 
@@ -219,40 +221,58 @@ def watch(
     offset = 0 if once else log_path.stat().st_size
     console.print(f"Watching [cyan]{log_path}[/cyan] every {interval}s (offset={offset})...")
 
-    while True:
-        try:
-            size = log_path.stat().st_size
-            if size < offset:
-                console.print("[yellow]Detected log rotation/truncation; resetting offset to 0.[/yellow]")
-                offset = 0
-            if size > offset:
-                with log_path.open("r", encoding="utf-8", errors="replace") as fh:
-                    fh.seek(offset)
-                    chunk = fh.read()
-                    offset = fh.tell()
-                lines = [ln for ln in chunk.splitlines() if ln.strip()]
-                if lines:
-                    events = parse_log_lines(lines)
-                    report = analyze_events(
-                        events=events,
-                        config=cfg,
-                        log_source=str(log_path),
-                        use_llm=not no_llm,
-                        model_override=model,
-                    )
-                    if report.total_alerts > 0:
-                        prefix = f"watch_{report.report_id.lower()}"
-                        written = write_reports(report, output_dir=output_dir, fmt="all", prefix=prefix)
-                        console.print(
-                            f"[red][ALERT][/red] {report.overall_risk.value}: {report.total_alerts} alert(s) -> {written[0]}"
-                        )
-        except KeyboardInterrupt:
-            console.print("Stopping watcher.")
-            break
+    # Keep recent events across polls so an attack split over two polling intervals (e.g. 3 failed
+    # logins, then 3 more) is still seen as one brute force. Only alerts not reported before
+    # trigger a new report.
+    context = timedelta(seconds=max(cfg.detection.window_seconds, cfg.detection.correlation_gap_seconds))
+    recent_events: list[LogEvent] = []
+    reported: set[tuple[str, str | None, str | None, str]] = set()
 
-        if once:
-            break
-        time.sleep(interval)
+    try:
+        while True:
+            try:
+                size = log_path.stat().st_size
+                if size < offset:
+                    console.print("[yellow]Detected log rotation/truncation; resetting offset to 0.[/yellow]")
+                    offset = 0
+                if size > offset:
+                    with log_path.open("rb") as fh:
+                        fh.seek(offset)
+                        data = fh.read()
+                    # Only consume complete lines; a partially written last line is picked up next poll.
+                    complete = data if once else data[: data.rfind(b"\n") + 1]
+                    offset += len(complete)
+                    lines = [ln for ln in complete.decode("utf-8", errors="replace").splitlines() if ln.strip()]
+                    if lines:
+                        recent_events.extend(parse_log_lines(lines))
+                        newest = max(e.timestamp for e in recent_events)
+                        recent_events = [e for e in recent_events if newest - e.timestamp <= context]
+                        report = analyze_events(
+                            events=recent_events,
+                            config=cfg,
+                            log_source=str(log_path),
+                            use_llm=not no_llm,
+                            model_override=model,
+                        )
+                        keys = {
+                            (a.rule_id, a.src_ip, a.user, a.start_time.isoformat()) for a in report.alerts
+                        }
+                        new_keys = keys - reported
+                        if new_keys:
+                            reported |= new_keys
+                            prefix = f"watch_{report.report_id.lower()}"
+                            written = write_reports(report, output_dir=output_dir, fmt="all", prefix=prefix)
+                            console.print(
+                                f"[red][ALERT][/red] {report.overall_risk.value}: {len(new_keys)} new alert(s) -> {written[0]}"
+                            )
+            except Exception as exc:  # keep the daemon alive (file briefly missing during rotation, etc.)
+                console.print(f"[red]Watch cycle failed:[/red] {exc}")
+
+            if once:
+                break
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        console.print("Stopping watcher.")
 
 
 def _render_live_dashboard(state: AgentRunState) -> Layout:

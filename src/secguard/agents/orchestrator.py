@@ -29,7 +29,7 @@ from secguard.detectors import (
 )
 from secguard.llm.ollama_client import OllamaClient, OllamaTelemetry, extract_json_object
 from secguard.llm.sanitizer import wrap_untrusted_evidence
-from secguard.llm.triage import IncidentTriage, SecurityReport
+from secguard.llm.triage import IncidentTriage, SecurityReport, apply_guardrails
 from secguard.parsers import parse_log_file
 from secguard.rag import MitreEntry, MitreRetriever
 from secguard.reporting import write_reports
@@ -81,7 +81,10 @@ class _HunterOutput(BaseModel):
     @field_validator("confidence", mode="before")
     @classmethod
     def _norm_conf(cls, v: Any) -> float:
-        num = float(v)
+        try:
+            num = float(str(v).strip().rstrip("%"))
+        except ValueError:
+            return 0.85
         if num > 1.0:
             num = num / 100.0
         return max(0.0, min(1.0, num))
@@ -510,13 +513,7 @@ class MultiAgentOrchestrator:
 
                 # Deterministic severity / injection floor guardrails
                 has_inj = any(a.rule_id == "LOG_PROMPT_INJECTION" for a in c.alerts)
-                if severity_rank(c.severity) > severity_rank(h_out.severity) and any(
-                    a.rule_id in {"SSH_BRUTE_FORCE_SUCCESS", "SUSPICIOUS_PRIV_EXEC", "LOG_PROMPT_INJECTION"}
-                    for a in c.alerts
-                ):
-                    h_out.severity = c.severity
-                if has_inj and h_out.verdict == "FALSE_POSITIVE":
-                    h_out.verdict = "TRUE_POSITIVE"
+                h_out.severity, h_out.verdict = apply_guardrails(c, h_out.severity, h_out.verdict)
                 h_out.prompt_injection_detected = h_out.prompt_injection_detected or has_inj
                 h_out.mitre_techniques = sorted(set(c.mitre_techniques) | set(h_out.mitre_techniques))
                 hunter_results[c.incident_id] = h_out

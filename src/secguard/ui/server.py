@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -20,6 +21,7 @@ from secguard.agents.orchestrator import MultiAgentOrchestrator
 from secguard.config import AppConfig, load_config
 
 _STATIC_INDEX = Path(__file__).with_name("static") / "index.html"
+_RUN_ID_RE = re.compile(r"RUN-[0-9A-Za-z-]{1,64}")
 
 
 class StartRunRequest(BaseModel):
@@ -43,9 +45,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             active_runs[run_id] = state
             subs = list(subscribers.get(run_id, []))
         for loop, queue in subs:
-            loop.call_soon_threadsafe(queue.put_nowait, payload)
-            if state.status in {"completed", "failed"}:
-                loop.call_soon_threadsafe(queue.put_nowait, None)
+            try:
+                loop.call_soon_threadsafe(queue.put_nowait, payload)
+                if state.status in {"completed", "failed"}:
+                    loop.call_soon_threadsafe(queue.put_nowait, None)
+            except RuntimeError:
+                # Subscriber's event loop already closed (client gone); this must not
+                # propagate into the orchestrator and fail the run.
+                continue
 
     def _load_disk_runs() -> list[AgentRunState]:
         runs_dir = Path(cfg.hermes.runs_dir)
@@ -60,6 +67,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return loaded
 
     def _get_run(run_id: str) -> AgentRunState | None:
+        if not _RUN_ID_RE.fullmatch(run_id):  # run_id becomes part of a file path below
+            return None
         with lock:
             if run_id in active_runs:
                 return active_runs[run_id]
@@ -131,11 +140,22 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
         return json.loads(run_state.model_dump_json())
 
+    allowed_roots = [Path(d).resolve() for d in cfg.ui.allowed_log_dirs]
+
+    def _resolve_allowed_log(raw_path: str) -> Path:
+        candidate = Path(raw_path).resolve()
+        if not any(candidate.is_relative_to(root) for root in allowed_roots):
+            raise HTTPException(
+                status_code=403,
+                detail="Log path is outside the allowed log directories (see ui.allowed_log_dirs in config.yaml).",
+            )
+        if not candidate.is_file():
+            raise HTTPException(status_code=400, detail=f"Log file not found: {raw_path}")
+        return candidate
+
     @app.post("/api/runs", status_code=202)
     def start_run(req: StartRunRequest) -> dict[str, str]:
-        log_path = Path(req.log_path)
-        if not log_path.exists() or not log_path.is_file():
-            raise HTTPException(status_code=400, detail=f"Log file not found: {req.log_path}")
+        log_path = _resolve_allowed_log(req.log_path)
 
         run_id = f"RUN-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:4].upper()}"
         chosen_model = req.model or (cfg.hermes.model if req.backend == "hermes" else cfg.ollama.model)
