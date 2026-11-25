@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -27,17 +27,20 @@ _AUDITD_RE = re.compile(
     r"msg=audit\((?P<epoch>\d+(?:\.\d+)?):(?P<serial>\d+)\):\s*(?P<body>.*)$"
 )
 
+# IPv4 or IPv6 address (sshd logs both, e.g. "from 2001:db8::1 port 22")
+_IP = r"(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7})"
+
 _SSH_INVALID_RE = re.compile(
-    r"Invalid user\s+(?P<user>\S+)\s+from\s+(?P<ip>\d{1,3}(?:\.\d{1,3}){3})(?:\s+port\s+(?P<port>\d+))?"
+    r"Invalid user\s+(?P<user>\S+)\s+from\s+(?P<ip>" + _IP + r")(?:\s+port\s+(?P<port>\d+))?"
 )
 _SSH_FAILED_RE = re.compile(
-    r"Failed\s+(?P<method>\S+)\s+for\s+(?:invalid user\s+)?(?P<user>\S+)\s+from\s+(?P<ip>\d{1,3}(?:\.\d{1,3}){3})(?:\s+port\s+(?P<port>\d+))?"
+    r"Failed\s+(?P<method>\S+)\s+for\s+(?:invalid user\s+)?(?P<user>\S+)\s+from\s+(?P<ip>" + _IP + r")(?:\s+port\s+(?P<port>\d+))?"
 )
 _SSH_ACCEPTED_RE = re.compile(
-    r"Accepted\s+(?P<method>\S+)\s+for\s+(?P<user>\S+)\s+from\s+(?P<ip>\d{1,3}(?:\.\d{1,3}){3})(?:\s+port\s+(?P<port>\d+))?"
+    r"Accepted\s+(?P<method>\S+)\s+for\s+(?P<user>\S+)\s+from\s+(?P<ip>" + _IP + r")(?:\s+port\s+(?P<port>\d+))?"
 )
 _SSH_DISCONNECT_RE = re.compile(
-    r"(?:Disconnected from|Connection closed by)\s+(?:(?:authenticating|invalid)\s+user\s+)?(?:(?P<user>\S+)\s+)?(?P<ip>\d{1,3}(?:\.\d{1,3}){3})(?:\s+port\s+(?P<port>\d+))?"
+    r"(?:Disconnected from|Connection closed by)\s+(?:(?:authenticating|invalid)\s+user\s+)?(?:(?P<user>\S+)\s+)?(?P<ip>" + _IP + r")(?:\s+port\s+(?P<port>\d+))?"
 )
 _PAM_RHOST_RE = re.compile(r"\brhost=(\S+)")
 _PAM_USER_RE = re.compile(r"\buser=(\S+)")
@@ -153,7 +156,12 @@ def _parse_auditd_line(line: str, match: re.Match[str]) -> LogEvent:
     )
 
 
-def _parse_syslog_line(line: str, source_hint: str, default_year: int) -> LogEvent:
+def _parse_syslog_line(
+    line: str,
+    source_hint: str,
+    default_year: int,
+    infer_year: bool = False,
+) -> LogEvent:
     ts: datetime
     host = "unknown"
     proc = "unknown"
@@ -168,6 +176,13 @@ def _parse_syslog_line(line: str, source_hint: str, default_year: int) -> LogEve
         msg = iso_m.group("msg")
     elif rfc_m := _RFC3164_RE.match(line):
         ts = _parse_rfc3164_ts(rfc_m.group("month"), rfc_m.group("day"), rfc_m.group("time"), default_year)
+        # RFC 3164 headers carry no year. When we guessed "current year", a December line read in
+        # January would land in the future, so roll it back one year.
+        if infer_year and ts > datetime.now(timezone.utc) + timedelta(days=1):
+            try:
+                ts = ts.replace(year=ts.year - 1)
+            except ValueError:  # Feb 29 in a non-leap year
+                ts = ts.replace(year=ts.year - 1, day=28)
         host = rfc_m.group("host")
         proc = rfc_m.group("proc")
         pid = int(rfc_m.group("pid")) if rfc_m.group("pid") else None
@@ -340,6 +355,7 @@ def parse_log_lines(
     default_year: int | None = None,
 ) -> list[LogEvent]:
     """Parse an iterable of Linux log lines into normalized LogEvent objects."""
+    infer_year = default_year is None
     year = default_year or datetime.now(timezone.utc).year
     events: list[LogEvent] = []
     for raw_line in lines:
@@ -349,7 +365,7 @@ def parse_log_lines(
         if audit_m := _AUDITD_RE.match(line):
             events.append(_parse_auditd_line(line, audit_m))
         else:
-            events.append(_parse_syslog_line(line, source_hint=source, default_year=year))
+            events.append(_parse_syslog_line(line, source_hint=source, default_year=year, infer_year=infer_year))
     return events
 
 

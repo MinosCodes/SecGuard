@@ -43,6 +43,33 @@ Return ONLY a valid JSON object with these exact keys:
 }"""
 
 
+Verdict = Literal["TRUE_POSITIVE", "SUSPICIOUS", "FALSE_POSITIVE"]
+
+
+def apply_guardrails(
+    cluster: IncidentCluster,
+    severity: Severity,
+    verdict: Verdict,
+) -> tuple[Severity, Verdict]:
+    """Stop LLM output from downgrading what the deterministic rules already confirmed.
+
+    The LLM reads attacker-controlled log text, so its verdict can be steered by prompt injection.
+    - Severity never drops below the highest HIGH/CRITICAL deterministic rule alert in the cluster.
+    - A cluster with a HIGH+ rule hit or an injection payload can never be marked FALSE_POSITIVE.
+    Anomaly-only or low-severity clusters are left to the model's judgement.
+    """
+    rule_ranks = [severity_rank(a.severity) for a in cluster.alerts if a.detector == "rule"]
+    rule_floor = max(rule_ranks, default=0)
+    rule_confirmed = rule_floor >= severity_rank(Severity.HIGH)
+    has_injection = any(a.rule_id == "LOG_PROMPT_INJECTION" for a in cluster.alerts)
+
+    if rule_confirmed and severity_rank(severity) < rule_floor:
+        severity = next(s for s in Severity if severity_rank(s) == rule_floor)
+    if (rule_confirmed or has_injection) and verdict == "FALSE_POSITIVE":
+        verdict = "TRUE_POSITIVE"
+    return severity, verdict
+
+
 def _coerce_str_list(val: Any) -> list[str]:
     if not isinstance(val, list):
         return [str(val)] if val else []
@@ -90,7 +117,10 @@ class _LlmIncidentResponse(BaseModel):
     @field_validator("confidence", mode="before")
     @classmethod
     def _norm_confidence(cls, v: Any) -> float:
-        num = float(v)
+        try:
+            num = float(str(v).strip().rstrip("%"))
+        except ValueError:  # e.g. "high" -- not worth a full LLM retry
+            return 0.75
         if num > 1.0:
             num = num / 100.0
         return max(0.0, min(1.0, num))
@@ -253,6 +283,7 @@ def analyze_events(
     llm_client = client or (OllamaClient(config.ollama) if use_llm else None)
     triages: list[IncidentTriage] = []
     telemetry_list: list[OllamaTelemetry] = []
+    llm_failures = 0
 
     for cluster in clusters:
         rag_entries = mitre_retriever.retrieve_for_incident(
@@ -264,29 +295,26 @@ def analyze_events(
             continue
 
         prompt = _build_user_prompt(cluster, rag_entries, config)
-        parsed, tel = llm_client.chat_structured(
-            messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ],
-            schema=_LlmIncidentResponse,
-            model=chosen_model,
-            keep_alive=keep_alive,
-        )
+        try:
+            parsed, tel = llm_client.chat_structured(
+                messages=[
+                    {"role": "system", "content": _SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                schema=_LlmIncidentResponse,
+                model=chosen_model,
+                keep_alive=keep_alive,
+            )
+        except Exception:
+            # Ollama down, timeout, or unusable JSON: one bad incident must not lose the whole
+            # report (or kill the watch daemon). Fall back to the deterministic triage.
+            llm_failures += 1
+            triages.append(_deterministic_triage(cluster, rag_entries))
+            continue
         telemetry_list.append(tel)
 
         has_injection_rule = any(a.rule_id == "LOG_PROMPT_INJECTION" for a in cluster.alerts)
-        # Never allow a prompt injection to downgrade a rule-confirmed CRITICAL/HIGH compromise to FALSE_POSITIVE
-        final_severity = parsed.severity
-        if severity_rank(cluster.severity) > severity_rank(final_severity) and any(
-            a.rule_id in {"SSH_BRUTE_FORCE_SUCCESS", "SUSPICIOUS_PRIV_EXEC", "LOG_PROMPT_INJECTION"}
-            for a in cluster.alerts
-        ):
-            final_severity = cluster.severity
-
-        final_verdict = parsed.verdict
-        if has_injection_rule and final_verdict == "FALSE_POSITIVE":
-            final_verdict = "TRUE_POSITIVE"
+        final_severity, final_verdict = apply_guardrails(cluster, parsed.severity, parsed.verdict)
 
         merged_mitre = sorted(set(cluster.mitre_techniques) | set(parsed.mitre_techniques))
 
@@ -319,6 +347,10 @@ def analyze_events(
     )
     if inj_count:
         summary += f" Detected and neutralized prompt-injection evasion attempt(s) in {inj_count} incident(s)."
+    if llm_failures:
+        summary += (
+            f" LLM triage failed for {llm_failures} incident(s); deterministic triage was used for those."
+        )
 
     return SecurityReport(
         report_id=f"REP-{uuid.uuid4().hex[:8].upper()}",

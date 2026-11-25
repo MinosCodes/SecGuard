@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any, Callable
 
@@ -27,6 +29,56 @@ class HermesTurnResult(BaseModel):
     duration_ms: int = 0
     exit_code: int = 0
     error: str | None = None
+
+
+def _popen_group_kwargs() -> dict[str, Any]:
+    """Start the child in its own process group so the whole tree can be killed on timeout."""
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+def _kill_tree(proc: subprocess.Popen[str]) -> None:
+    """Kill a process *and its children*.
+
+    `hermes` may be a launcher (.cmd shim, Python entry point) whose child keeps the stdout pipe
+    open; killing only the launcher would leave us blocked on that pipe until the child exits.
+    """
+    if proc.poll() is not None:
+        return
+    try:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                capture_output=True,
+                timeout=10,
+            )
+        else:
+            os.killpg(proc.pid, signal.SIGKILL)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    if proc.poll() is None:
+        proc.kill()
+
+
+def _run_with_timeout(cmd: list[str], timeout: float) -> tuple[int, str, str]:
+    """subprocess.run equivalent whose timeout also kills grandchildren."""
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        **_popen_group_kwargs(),
+    )
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_tree(proc)
+        proc.communicate()
+        raise
+    return proc.returncode, out, err
 
 
 def hermes_home_dir() -> Path:
@@ -58,16 +110,9 @@ def list_installed_hermes_profiles(hermes_exe: str = "hermes") -> set[str]:
                 profiles.add(child.name)
 
     try:
-        proc = subprocess.run(
-            [hermes_exe, "profile", "list"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=15,
-        )
-        if proc.returncode == 0:
-            for raw_line in proc.stdout.splitlines():
+        returncode, stdout, _stderr = _run_with_timeout([hermes_exe, "profile", "list"], timeout=15)
+        if returncode == 0:
+            for raw_line in stdout.splitlines():
                 line = raw_line.strip()
                 if not line or line.startswith(("Profile", "─", "—", "Usage")):
                     continue
@@ -224,15 +269,34 @@ class HermesOllamaRunner:
         error_msg: str | None = None
         non_json_lines: list[str] = []
 
+        # stderr goes to a temp file rather than a pipe: an unread stderr pipe can fill up and
+        # deadlock the child while we block on stdout.
+        stderr_file = tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace")
+        timed_out = threading.Event()
+        timer: threading.Timer | None = None
+        proc: subprocess.Popen[str] | None = None
+
         try:
             proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=stderr_file,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
+                **_popen_group_kwargs(),
             )
+
+            def _kill_on_timeout() -> None:
+                timed_out.set()
+                _kill_tree(proc)
+
+            # Reading stdout blocks until the process exits, so a wait(timeout=...) afterwards can
+            # never fire. A timer that kills the process enforces the limit for real.
+            timer = threading.Timer(self.config.hermes.timeout_seconds, _kill_on_timeout)
+            timer.daemon = True
+            timer.start()
+
             assert proc.stdout is not None
             for raw_line in proc.stdout:
                 ev = parse_stream_json_line(raw_line)
@@ -266,13 +330,25 @@ class HermesOllamaRunner:
                     if ev.get("error"):
                         error_msg = str(ev["error"])
 
-            proc.wait(timeout=self.config.hermes.timeout_seconds)
-            stderr_text = proc.stderr.read().strip() if proc.stderr else ""
+            proc.wait()
+            if timed_out.is_set():
+                raise RuntimeError(
+                    f"Hermes runner timed out after {self.config.hermes.timeout_seconds:.0f}s ({profile})"
+                )
+            stderr_file.seek(0)
+            stderr_text = stderr_file.read().strip()
             if proc.returncode != 0 and exit_code == 0:
                 exit_code = proc.returncode
             if exit_code != 0 and not error_msg:
                 error_msg = stderr_text or " | ".join(non_json_lines[-3:]) or f"Hermes exited with {exit_code}"
         finally:
+            if timer is not None:
+                timer.cancel()
+            if proc is not None and proc.poll() is None:
+                # e.g. an on_event callback raised mid-stream: don't leave an orphaned process
+                _kill_tree(proc)
+                proc.wait()
+            stderr_file.close()
             query_file.unlink(missing_ok=True)
 
         full_text = "".join(text_chunks).strip()

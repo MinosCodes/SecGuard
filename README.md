@@ -278,6 +278,8 @@ Settings live in [`config.yaml`](config.yaml) and can be overridden via environm
 - `SECGUARD_MODEL` (default: `phi4:latest`)
 - `SECGUARD_EMBED_MODEL` (default: `nomic-embed-text:latest`)
 
+The web UI only analyzes log files inside `ui.allowed_log_dirs` (default: `samples/`). Add your log directory there (e.g. `/var/log`) to run it on real logs.
+
 ---
 
 ## Linux Server Deployment
