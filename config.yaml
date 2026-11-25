@@ -1,0 +1,31 @@
+ollama:
+  base_url: "http://127.0.0.1:11434"
+  model: "phi4:latest"
+  embed_model: "nomic-embed-text:latest"
+  timeout_seconds: 300.0
+  num_ctx: 4096
+  num_predict: 900
+  temperature: 0.1
+  disable_thinking: true
+  keep_alive: "5m"
+  benchmark_models:
+    - "phi4:latest"
+    - "Gemma4:12b"
+    - "qwen-abliterated:latest"
+
+detection:
+  ssh_brute_force_threshold: 5
+  ssh_spray_user_threshold: 4
+  window_seconds: 300
+  correlation_gap_seconds: 1800
+  anomaly_bucket_minutes: 5
+  anomaly_contamination: 0.15
+
+sanitizer:
+  max_line_chars: 240
+  max_evidence_lines: 25
+
+rag:
+  enabled: true
+  top_k: 4
+  cache_path: ".cache/mitre_kb_embeddings.json"

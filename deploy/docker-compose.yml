@@ -1,0 +1,33 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  secguard:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    depends_on:
+      - ollama
+    environment:
+      - SECGUARD_OLLAMA_URL=http://ollama:11434
+      - SECGUARD_MODEL=FenkoHQ/Foundation-Sec-8B:latest
+      - SECGUARD_EMBED_MODEL=nomic-embed-text:latest
+    volumes:
+      - /var/log:/var/log:ro
+      - ../reports:/app/reports
+    command: ["watch", "/var/log/auth.log", "--interval", "15", "--output-dir", "/app/reports"]
+
+volumes:
+  ollama_data:

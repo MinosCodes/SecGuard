@@ -1,0 +1,22 @@
+# Python environments & caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Test, tool, and embedding caches
+.pytest_cache/
+.cache/
+.mypy_cache/
+.ruff_cache/
+
+# Generated local reports & benchmarks
+reports/
+
+# Environment & OS files
+.env
+.DS_Store
+Thumbs.db

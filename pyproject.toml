@@ -1,0 +1,34 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "secguard-llm"
+version = "0.1.0"
+description = "Hybrid rule, anomaly, and local LLM cybersecurity detection, triage, and reporting for Linux logs"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.27",
+    "pydantic>=2.8",
+    "pyyaml>=6.0",
+    "scikit-learn>=1.5",
+    "numpy>=2.0",
+    "typer>=0.12",
+    "rich>=13.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+]
+
+[project.scripts]
+secguard = "secguard.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/secguard"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

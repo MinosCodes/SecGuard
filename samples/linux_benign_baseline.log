@@ -1,0 +1,60 @@
+2026-11-25T08:00:01+00:00 prod-web-01 systemd[1]: Started Daily apt download activities.
+2026-11-25T08:02:14+00:00 prod-web-01 sshd[1041]: Accepted publickey for alice from 10.10.2.15 port 51204 ssh2: ED25519 SHA256:abc123
+2026-11-25T08:02:14+00:00 prod-web-01 sshd[1041]: pam_unix(sshd:session): session opened for user alice(uid=1001) by (uid=0)
+2026-11-25T08:03:05+00:00 prod-web-01 sudo:    alice : TTY=pts/0 ; PWD=/home/alice ; USER=root ; COMMAND=/usr/bin/systemctl status nginx
+2026-11-25T08:04:40+00:00 prod-web-01 sshd[1041]: pam_unix(sshd:session): session closed for user alice
+2026-11-25T08:05:01+00:00 prod-web-01 CRON[1098]: (root) CMD (command -v debian-sa1 > /dev/null && debian-sa1 1 1)
+2026-11-25T08:10:12+00:00 prod-web-01 sshd[1120]: Accepted publickey for bob from 10.10.2.22 port 54012 ssh2: ED25519 SHA256:def456
+2026-11-25T08:10:12+00:00 prod-web-01 sshd[1120]: pam_unix(sshd:session): session opened for user bob(uid=1002) by (uid=0)
+2026-11-25T08:11:30+00:00 prod-web-01 systemd[1]: nginx.service: Reloaded.
+2026-11-25T08:12:45+00:00 prod-web-01 sshd[1120]: pam_unix(sshd:session): session closed for user bob
+2026-11-25T08:15:01+00:00 prod-web-01 CRON[1180]: (root) CMD (command -v debian-sa1 > /dev/null && debian-sa1 1 1)
+2026-11-25T08:20:09+00:00 prod-web-01 sshd[1215]: Accepted publickey for deploy from 10.10.4.8 port 49812 ssh2: ED25519 SHA256:ghi789
+2026-11-25T08:20:10+00:00 prod-web-01 sshd[1215]: pam_unix(sshd:session): session opened for user deploy(uid=1003) by (uid=0)
+2026-11-25T08:21:00+00:00 prod-web-01 sudo:   deploy : TTY=pts/1 ; PWD=/srv/app ; USER=root ; COMMAND=/usr/bin/systemctl restart app.service
+2026-11-25T08:22:18+00:00 prod-web-01 sshd[1215]: pam_unix(sshd:session): session closed for user deploy
+2026-11-25T08:25:01+00:00 prod-web-01 CRON[1260]: (root) CMD (command -v debian-sa1 > /dev/null && debian-sa1 1 1)
+2026-11-25T08:30:22+00:00 prod-web-01 sshd[1302]: Accepted publickey for alice from 10.10.2.15 port 52910 ssh2: ED25519 SHA256:abc123
+2026-11-25T08:31:05+00:00 prod-web-01 sshd[1302]: pam_unix(sshd:session): session closed for user alice
+2026-11-25T08:35:01+00:00 prod-web-01 CRON[1355]: (root) CMD (/usr/local/bin/healthcheck.sh)
+2026-11-25T08:40:11+00:00 prod-web-01 systemd-logind[602]: New session 44 of user bob.
+2026-11-25T08:40:12+00:00 prod-web-01 sshd[1401]: Accepted publickey for bob from 10.10.2.22 port 55102 ssh2: ED25519 SHA256:def456
+2026-11-25T08:41:19+00:00 prod-web-01 sudo:      bob : TTY=pts/0 ; PWD=/home/bob ; USER=root ; COMMAND=/usr/bin/journalctl -u nginx -n 50
+2026-11-25T08:42:03+00:00 prod-web-01 sshd[1401]: pam_unix(sshd:session): session closed for user bob
+2026-11-25T08:45:01+00:00 prod-web-01 CRON[1460]: (root) CMD (command -v debian-sa1 > /dev/null && debian-sa1 1 1)
+2026-11-25T08:50:44+00:00 prod-web-01 sshd[1510]: Accepted publickey for alice from 10.10.2.15 port 53301 ssh2: ED25519 SHA256:abc123
+2026-11-25T08:51:10+00:00 prod-web-01 sshd[1510]: pam_unix(sshd:session): session closed for user alice
+2026-11-25T08:55:01+00:00 prod-web-01 CRON[1572]: (root) CMD (command -v debian-sa1 > /dev/null && debian-sa1 1 1)
+2026-11-25T09:00:05+00:00 prod-web-01 systemd[1]: Starting Rotate log files...
+2026-11-25T09:00:08+00:00 prod-web-01 systemd[1]: Finished Rotate log files.
+2026-11-25T09:05:19+00:00 prod-web-01 sshd[1620]: Accepted publickey for deploy from 10.10.4.8 port 50114 ssh2: ED25519 SHA256:ghi789
+2026-11-25T09:06:02+00:00 prod-web-01 sudo:   deploy : TTY=pts/1 ; PWD=/srv/app ; USER=root ; COMMAND=/usr/bin/systemctl status app.service
+2026-11-25T09:07:30+00:00 prod-web-01 sshd[1620]: pam_unix(sshd:session): session closed for user deploy
+2026-11-25T09:10:01+00:00 prod-web-01 CRON[1688]: (root) CMD (command -v debian-sa1 > /dev/null && debian-sa1 1 1)
+2026-11-25T09:15:33+00:00 prod-web-01 sshd[1712]: Accepted publickey for alice from 10.10.2.15 port 54211 ssh2: ED25519 SHA256:abc123
+2026-11-25T09:16:41+00:00 prod-web-01 sshd[1712]: pam_unix(sshd:session): session closed for user alice
+2026-11-25T09:20:01+00:00 prod-web-01 CRON[1750]: (root) CMD (command -v debian-sa1 > /dev/null && debian-sa1 1 1)
+2026-11-25T09:25:18+00:00 prod-web-01 sshd[1801]: Accepted publickey for bob from 10.10.2.22 port 56001 ssh2: ED25519 SHA256:def456
+2026-11-25T09:26:12+00:00 prod-web-01 sudo:      bob : TTY=pts/0 ; PWD=/home/bob ; USER=root ; COMMAND=/usr/bin/df -h
+2026-11-25T09:27:00+00:00 prod-web-01 sshd[1801]: pam_unix(sshd:session): session closed for user bob
+2026-11-25T09:30:01+00:00 prod-web-01 CRON[1840]: (root) CMD (/usr/local/bin/healthcheck.sh)
+2026-11-25T09:35:45+00:00 prod-web-01 systemd[1]: Starting Cleanup of Temporary Directories...
+2026-11-25T09:35:46+00:00 prod-web-01 systemd[1]: Finished Cleanup of Temporary Directories.
+2026-11-25T09:40:12+00:00 prod-web-01 sshd[1902]: Accepted publickey for alice from 10.10.2.15 port 55109 ssh2: ED25519 SHA256:abc123
+2026-11-25T09:41:05+00:00 prod-web-01 sshd[1902]: pam_unix(sshd:session): session closed for user alice
+2026-11-25T09:45:01+00:00 prod-web-01 CRON[1955]: (root) CMD (command -v debian-sa1 > /dev/null && debian-sa1 1 1)
+2026-11-25T09:50:28+00:00 prod-web-01 sshd[2010]: Accepted publickey for deploy from 10.10.4.8 port 51002 ssh2: ED25519 SHA256:ghi789
+2026-11-25T09:51:15+00:00 prod-web-01 sshd[2010]: pam_unix(sshd:session): session closed for user deploy
+2026-11-25T09:55:01+00:00 prod-web-01 CRON[2050]: (root) CMD (command -v debian-sa1 > /dev/null && debian-sa1 1 1)
+2026-11-25T10:00:03+00:00 prod-web-01 systemd[1]: Started Session 50 of user alice.
+2026-11-25T10:00:04+00:00 prod-web-01 sshd[2101]: Accepted publickey for alice from 10.10.2.15 port 55990 ssh2: ED25519 SHA256:abc123
+2026-11-25T10:01:22+00:00 prod-web-01 sudo:    alice : TTY=pts/0 ; PWD=/home/alice ; USER=root ; COMMAND=/usr/bin/systemctl status postgresql
+2026-11-25T10:02:10+00:00 prod-web-01 sshd[2101]: pam_unix(sshd:session): session closed for user alice
+2026-11-25T10:05:01+00:00 prod-web-01 CRON[2150]: (root) CMD (command -v debian-sa1 > /dev/null && debian-sa1 1 1)
+2026-11-25T10:10:14+00:00 prod-web-01 sshd[2205]: Accepted publickey for bob from 10.10.2.22 port 56812 ssh2: ED25519 SHA256:def456
+2026-11-25T10:11:40+00:00 prod-web-01 sshd[2205]: pam_unix(sshd:session): session closed for user bob
+2026-11-25T10:15:01+00:00 prod-web-01 CRON[2250]: (root) CMD (/usr/local/bin/healthcheck.sh)
+2026-11-25T10:20:09+00:00 prod-web-01 systemd[1]: Started Daily man-db regeneration.
+2026-11-25T10:25:33+00:00 prod-web-01 sshd[2304]: Accepted publickey for alice from 10.10.2.15 port 57011 ssh2: ED25519 SHA256:abc123
+2026-11-25T10:26:18+00:00 prod-web-01 sshd[2304]: pam_unix(sshd:session): session closed for user alice
+2026-11-25T10:30:01+00:00 prod-web-01 CRON[2360]: (root) CMD (command -v debian-sa1 > /dev/null && debian-sa1 1 1)

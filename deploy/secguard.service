@@ -1,0 +1,25 @@
+[Unit]
+Description=SecGuard LLM Hybrid Log Monitor & Triage Service
+After=network-online.target ollama.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=secguard
+Group=secguard
+WorkingDirectory=/opt/secguard-llm
+ExecStart=/opt/secguard-llm/.venv/bin/secguard watch /var/log/auth.log --interval 15 --output-dir /var/lib/secguard/reports
+Restart=on-failure
+RestartSec=10
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/var/log
+ReadWritePaths=/var/lib/secguard
+SupplementaryGroups=adm
+
+[Install]
+WantedBy=multi-user.target

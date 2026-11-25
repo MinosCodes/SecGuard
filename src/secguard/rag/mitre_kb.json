@@ -1,0 +1,130 @@
+[
+  {
+    "id": "T1110.001",
+    "name": "Brute Force: Password Guessing",
+    "tactic": "Credential Access",
+    "description": "Adversaries use repetitive password guessing against SSH or other authentication services to obtain valid credentials.",
+    "linux_indicators": ["Multiple sshd 'Failed password' or 'Invalid user' entries from one source IP"],
+    "containment_steps": ["Block offending source IP via ufw/nftables", "Enforce SSH key-only authentication and fail2ban"]
+  },
+  {
+    "id": "T1110.003",
+    "name": "Brute Force: Password Spraying",
+    "tactic": "Credential Access",
+    "description": "Adversaries try one or a few common passwords across many usernames to evade per-account lockout thresholds.",
+    "linux_indicators": ["Failed sshd logins targeting 4+ distinct usernames from one IP"],
+    "containment_steps": ["Rate-limit SSH connections", "Audit targeted accounts for weak passwords or unexpected logins"]
+  },
+  {
+    "id": "T1078",
+    "name": "Valid Accounts",
+    "tactic": "Initial Access / Persistence / Privilege Escalation",
+    "description": "Adversaries use compromised legitimate credentials to log in and blend with normal administrative activity.",
+    "linux_indicators": ["Accepted password/publickey following brute-force attempts or from anomalous external IP"],
+    "containment_steps": ["Terminate active sessions for compromised user", "Rotate passwords/SSH keys and inspect recent commands"]
+  },
+  {
+    "id": "T1021.004",
+    "name": "Remote Services: SSH",
+    "tactic": "Lateral Movement",
+    "description": "Adversaries use SSH to interactively access remote Linux hosts or pivot internally.",
+    "linux_indicators": ["Unexpected sshd Accepted sessions or outbound SSH connections"],
+    "containment_steps": ["Restrict SSH access via AllowUsers/bastion firewall rules", "Review ~/.ssh/known_hosts and active PTYs"]
+  },
+  {
+    "id": "T1548.003",
+    "name": "Abuse Elevation Control Mechanism: Sudo and Sudo Caching",
+    "tactic": "Privilege Escalation",
+    "description": "Adversaries exploit misconfigured sudoers rules or cached credentials to execute commands as root.",
+    "linux_indicators": ["sudo 'user NOT in sudoers' events", "Unexpected sudo COMMAND execution"],
+    "containment_steps": ["Audit /etc/sudoers and /etc/sudoers.d", "Remove unauthorized privileges and revoke sudo tokens"]
+  },
+  {
+    "id": "T1059.004",
+    "name": "Command and Scripting Interpreter: Unix Shell",
+    "tactic": "Execution",
+    "description": "Adversaries execute bash/sh scripts, piped downloaders (curl|bash), base64 payloads, or reverse shells.",
+    "linux_indicators": ["auditd EXECVE or sudo commands invoking curl|bash, /dev/tcp, nc -e, or base64 -d"],
+    "containment_steps": ["Kill malicious child processes", "Capture volatile script artifacts and check outbound C2 connections"]
+  },
+  {
+    "id": "T1003.008",
+    "name": "OS Credential Dumping: /etc/passwd and /etc/shadow",
+    "tactic": "Credential Access",
+    "description": "Adversaries read /etc/shadow or /etc/gshadow to extract password hashes for offline cracking.",
+    "linux_indicators": ["sudo or auditd EXECVE reading /etc/shadow or /etc/gshadow"],
+    "containment_steps": ["Assume local password hashes are exposed; force password rotation for accounts with hashes"]
+  },
+  {
+    "id": "T1053.003",
+    "name": "Scheduled Task/Job: Cron",
+    "tactic": "Persistence / Execution",
+    "description": "Adversaries create or modify cron jobs to maintain persistence or run recurring malicious scripts.",
+    "linux_indicators": ["Modifications to /var/spool/cron, /etc/crontab, /etc/cron.d, or crontab -e execution"],
+    "containment_steps": ["Inspect all user crontabs and /etc/cron* directories", "Remove unauthorized cron entries"]
+  },
+  {
+    "id": "T1098.004",
+    "name": "Account Manipulation: SSH Authorized Keys",
+    "tactic": "Persistence",
+    "description": "Adversaries add attacker-controlled public keys to ~/.ssh/authorized_keys for stealthy persistent access.",
+    "linux_indicators": ["Commands or file writes referencing authorized_keys"],
+    "containment_steps": ["Audit ~/.ssh/authorized_keys across all users including root", "Remove unrecognized public keys"]
+  },
+  {
+    "id": "T1136.001",
+    "name": "Create Account: Local Account",
+    "tactic": "Persistence",
+    "description": "Adversaries create hidden or service-like local Linux accounts to maintain access after initial remediation.",
+    "linux_indicators": ["useradd events in auth.log or auditd", "New entries in /etc/passwd and /etc/shadow"],
+    "containment_steps": ["Lock and remove unauthorized accounts (usermod -L / userdel)", "Review /etc/sudoers group memberships"]
+  },
+  {
+    "id": "T1105",
+    "name": "Ingress Tool Transfer",
+    "tactic": "Command and Control",
+    "description": "Adversaries download external tools, payloads, or scripts onto the compromised host via curl, wget, or scp.",
+    "linux_indicators": ["curl or wget fetching remote scripts or binaries from external IPs/domains"],
+    "containment_steps": ["Block destination C2 IP/domain", "Hash and quarantine downloaded artifacts in /tmp or /dev/shm"]
+  },
+  {
+    "id": "T1070.002",
+    "name": "Indicator Removal: Clear Linux or Mac System Logs",
+    "tactic": "Defense Evasion",
+    "description": "Adversaries truncate, delete, or alter /var/log/auth.log, wtmp, or bash_history to hide intrusion tracks.",
+    "linux_indicators": ["truncate, shred, rm, or echo > targeting /var/log/* or ~/.bash_history"],
+    "containment_steps": ["Preserve remote syslog/journald backups", "Check filesystem metadata and auditd logs"]
+  },
+  {
+    "id": "T1562",
+    "name": "Impair Defenses",
+    "tactic": "Defense Evasion",
+    "description": "Adversaries attempt to disable security controls, firewalls, auditd, or inject misleading instructions into AI/log triage pipelines.",
+    "linux_indicators": ["Prompt-injection strings in SSH usernames/commands or stopping auditd/ufw/fail2ban"],
+    "containment_steps": ["Verify security services (auditd, ufw, SIEM forwarder) are active", "Treat prompt-injection attempts as hostile activity"]
+  },
+  {
+    "id": "T1046",
+    "name": "Network Service Discovery",
+    "tactic": "Discovery",
+    "description": "Adversaries scan local or adjacent subnets for open ports and internal services after gaining shell access.",
+    "linux_indicators": ["Execution of nmap, masscan, or ss/netstat sweeps"],
+    "containment_steps": ["Check lateral network flows from the host", "Segment internal services"]
+  },
+  {
+    "id": "T1087.001",
+    "name": "Account Discovery: Local Account",
+    "tactic": "Discovery",
+    "description": "Adversaries enumerate local users, groups, and sudo privileges via id, whoami, /etc/passwd, or getent.",
+    "linux_indicators": ["Burst execution of id, groups, getent passwd, sudo -l"],
+    "containment_steps": ["Correlate discovery commands with preceding authentication events"]
+  },
+  {
+    "id": "T1543.002",
+    "name": "Create or Modify System Process: Systemd Service",
+    "tactic": "Persistence",
+    "description": "Adversaries install malicious systemd unit files to execute payloads automatically on boot.",
+    "linux_indicators": ["Writes to /etc/systemd/system/*.service or systemctl enable of unknown units"],
+    "containment_steps": ["Audit /etc/systemd/system and systemctl list-unit-files", "Disable and remove unauthorized unit files"]
+  }
+]
