@@ -49,11 +49,22 @@ class RagConfig(BaseModel):
     cache_path: str = ".cache/mitre_kb_embeddings.json"
 
 
+class HermesConfig(BaseModel):
+    enabled: bool = True
+    executable: str = "hermes"
+    provider: str = "ollama-launch"
+    model: str = "Gemma4:12b"
+    reasoning: str = "none"
+    timeout_seconds: float = 180.0
+    runs_dir: str = "reports/agent_runs"
+
+
 class AppConfig(BaseModel):
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
     detection: DetectionConfig = Field(default_factory=DetectionConfig)
     sanitizer: SanitizerConfig = Field(default_factory=SanitizerConfig)
     rag: RagConfig = Field(default_factory=RagConfig)
+    hermes: HermesConfig = Field(default_factory=HermesConfig)
 
 
 def load_config(config_path: Path | None = None) -> AppConfig:

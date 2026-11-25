@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SecGuard × Hermes Agent Visualizer</title>
+  <style>
+    :root {
+      --bg: #070b14;
+      --panel: #0f172a;
+      --panel-2: #162033;
+      --border: #24324a;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --blue: #38bdf8;
+      --indigo: #818cf8;
+      --green: #22c55e;
+      --amber: #f59e0b;
+      --red: #ef4444;
+      --purple: #a855f7;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: radial-gradient(circle at top right, #111c33, var(--bg) 55%);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      background: rgba(15, 23, 42, 0.9);
+      backdrop-filter: blur(8px);
+      position: sticky;
+      top: 0;
+      z-index: 20;
+    }
+    .brand { display: flex; align-items: center; gap: 0.75rem; }
+    .brand-dot {
+      width: 12px; height: 12px; border-radius: 50%;
+      background: var(--green); box-shadow: 0 0 12px var(--green);
+    }
+    h1 { margin: 0; font-size: 1.15rem; letter-spacing: 0.02em; }
+    .subtitle { font-size: 0.8rem; color: var(--muted); }
+    .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+    select, input, button {
+      background: var(--panel-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.45rem 0.7rem;
+      font-size: 0.85rem;
+    }
+    button.primary {
+      background: linear-gradient(135deg, #0284c7, #4f46e5);
+      border: none;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button.primary:disabled { opacity: 0.55; cursor: not-allowed; }
+    main { max-width: 1440px; margin: 0 auto; padding: 1.25rem 1.5rem; display: grid; gap: 1.25rem; }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem 1.15rem;
+    }
+    .panel-title {
+      display: flex; justify-content: space-between; align-items: center;
+      margin: 0 0 0.85rem 0; font-size: 0.9rem; text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--muted);
+    }
+    /* Topology SVG */
+    .topo-wrap { overflow-x: auto; }
+    svg.topology { width: 100%; min-width: 900px; height: 225px; display: block; }
+    .node-rect {
+      fill: #131d31; stroke: #334155; stroke-width: 1.8; rx: 10;
+      transition: all 0.25s ease;
+    }
+    .node-rect.running {
+      stroke: var(--blue); stroke-width: 2.6;
+      filter: drop-shadow(0 0 10px rgba(56, 189, 248, 0.55));
+    }
+    .node-rect.completed { stroke: var(--green); }
+    .node-rect.error { stroke: var(--red); }
+    .edge { stroke: #334155; stroke-width: 2; fill: none; }
+    .edge.active {
+      stroke: var(--blue); stroke-width: 2.5;
+      stroke-dasharray: 7 5; animation: dash 1s linear infinite;
+    }
+    .edge.ollama { stroke: #6366f1; stroke-dasharray: 4 4; opacity: 0.75; }
+    .edge.ollama.active { stroke: var(--purple); opacity: 1; animation: dash 0.9s linear infinite; }
+    @keyframes dash { to { stroke-dashoffset: -24; } }
+
+    /* Agent Cards */
+    .agents-grid { display: grid; grid-template-columns: repeat(4, minmax(220px, 1fr)); gap: 0.9rem; }
+    .agent-card {
+      background: var(--panel-2); border: 1px solid var(--border);
+      border-radius: 10px; padding: 0.85rem; transition: border-color 0.25s;
+    }
+    .agent-card.running { border-color: var(--blue); box-shadow: 0 0 18px rgba(56, 189, 248, 0.16); }
+    .agent-card.completed { border-color: rgba(34, 197, 94, 0.55); }
+    .agent-card.error { border-color: var(--red); }
+    .agent-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; }
+    .agent-name { font-weight: 700; font-size: 0.92rem; color: #f8fafc; }
+    .pill {
+      font-size: 0.72rem; font-weight: 700; padding: 0.15rem 0.5rem;
+      border-radius: 999px; text-transform: uppercase; background: #1e293b; color: var(--muted);
+    }
+    .pill.running { background: rgba(56, 189, 248, 0.2); color: var(--blue); }
+    .pill.completed { background: rgba(34, 197, 94, 0.2); color: var(--green); }
+    .pill.error, .pill.CRITICAL { background: rgba(239, 68, 68, 0.22); color: #fca5a5; }
+    .pill.HIGH { background: rgba(245, 158, 11, 0.22); color: #fcd34d; }
+    .pill.MEDIUM { background: rgba(234, 179, 8, 0.2); color: #fde047; }
+    .pill.LOW { background: rgba(34, 197, 94, 0.2); color: #86efac; }
+    .pill.shield { background: rgba(168, 85, 247, 0.25); color: #e9d5ff; }
+    .agent-meta { font-size: 0.76rem; color: var(--muted); line-height: 1.45; }
+    .agent-msg { margin-top: 0.45rem; font-size: 0.78rem; color: #cbd5e1; min-height: 2.1em; }
+
+    /* Kanban Task Board */
+    .kanban { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.9rem; }
+    .col { background: #0b1220; border: 1px solid var(--border); border-radius: 10px; padding: 0.75rem; min-height: 180px; }
+    .col h3 { margin: 0 0 0.6rem 0; font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+    .task-card {
+      background: var(--panel-2); border: 1px solid var(--border);
+      border-left: 3px solid #475569; border-radius: 8px; padding: 0.65rem 0.75rem; margin-bottom: 0.55rem;
+    }
+    .task-card.in_progress { border-left-color: var(--blue); }
+    .task-card.completed { border-left-color: var(--green); }
+    .task-card.skipped { border-left-color: var(--amber); opacity: 0.78; }
+    .task-card.failed { border-left-color: var(--red); }
+    .task-top { display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--muted); margin-bottom: 0.2rem; }
+    .task-title { font-weight: 600; font-size: 0.85rem; margin-bottom: 0.25rem; }
+    .task-summary { font-size: 0.78rem; color: #cbd5e1; }
+
+    /* Bottom split */
+    .bottom-grid { display: grid; grid-template-columns: 1.15fr 1fr; gap: 1.25rem; }
+    .stream-log {
+      background: #050810; border: 1px solid var(--border); border-radius: 8px;
+      padding: 0.75rem; height: 290px; overflow-y: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.78rem;
+    }
+    .log-row { padding: 0.22rem 0; border-bottom: 1px solid rgba(36, 50, 74, 0.45); }
+    .log-ts { color: #64748b; margin-right: 0.4rem; }
+    .log-ag { color: var(--blue); font-weight: 600; margin-right: 0.4rem; }
+    .findings-list { font-size: 0.83rem; line-height: 1.5; }
+    .tag {
+      display: inline-block; background: #1e293b; border: 1px solid #334155;
+      padding: 0.12rem 0.45rem; border-radius: 6px; font-size: 0.75rem; margin: 0.15rem 0.2rem 0.15rem 0;
+      font-family: ui-monospace, monospace; color: #7dd3fc;
+    }
+    .report-links a {
+      display: inline-block; margin-right: 0.5rem; margin-top: 0.5rem;
+      padding: 0.35rem 0.7rem; background: #1e293b; border: 1px solid var(--border);
+      border-radius: 6px; color: var(--blue); text-decoration: none; font-size: 0.8rem;
+    }
+    .report-links a:hover { border-color: var(--blue); }
+    @media (max-width: 1050px) {
+      .agents-grid { grid-template-columns: repeat(2, 1fr); }
+      .kanban, .bottom-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="brand-dot" id="connDot"></div>
+      <div>
+        <h1>SecGuard &times; Hermes Agent Command Center</h1>
+        <div class="subtitle">Local Ollama Inference &bull; Hybrid Rules + IsolationForest &bull; MITRE ATT&amp;CK RAG</div>
+      </div>
+    </div>
+    <div class="controls">
+      <select id="historySelect" title="Previous & Active Runs">
+        <option value="">Select run...</option>
+      </select>
+      <select id="sampleSelect"></select>
+      <select id="backendSelect">
+        <option value="hermes">Hermes + Ollama</option>
+        <option value="ollama">Direct Ollama</option>
+      </select>
+      <input id="modelInput" value="Gemma4:12b" size="18" title="Ollama Model" />
+      <button class="primary" id="runBtn">Run Hermes Agents</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel">
+      <div class="panel-title">
+        <span>Live Multi-Agent Topology</span>
+        <span id="runBanner" class="subtitle">Ready</span>
+      </div>
+      <div class="topo-wrap">
+        <svg class="topology" viewBox="0 0 1120 225">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 1 L 10 5 L 0 9 z" fill="#475569" />
+            </marker>
+          </defs>
+          <!-- Main flow edges -->
+          <path id="e-logs-col" class="edge" d="M 140 60 L 185 60" marker-end="url(#arrow)" />
+          <path id="e-col-rag" class="edge" d="M 355 60 L 400 60" marker-end="url(#arrow)" />
+          <path id="e-rag-hun" class="edge" d="M 555 60 L 600 60" marker-end="url(#arrow)" />
+          <path id="e-hun-res" class="edge" d="M 760 60 L 805 60" marker-end="url(#arrow)" />
+          <path id="e-res-rep" class="edge" d="M 965 60 L 1005 60" marker-end="url(#arrow)" />
+
+          <!-- Ollama hub connections -->
+          <path id="e-ol-hun" class="edge ollama" d="M 680 155 L 680 96" />
+          <path id="e-ol-res" class="edge ollama" d="M 885 155 L 885 96" />
+          <path id="e-ol-rep" class="edge ollama" d="M 980 180 L 1055 180 L 1055 96" />
+
+          <!-- Nodes -->
+          <g>
+            <rect id="n-logs" class="node-rect" x="15" y="25" width="125" height="70" />
+            <text x="77" y="55" fill="#f8fafc" font-size="13" font-weight="700" text-anchor="middle">Linux Logs</text>
+            <text x="77" y="75" fill="#94a3b8" font-size="11" text-anchor="middle">auth.log / auditd</text>
+          </g>
+          <g>
+            <rect id="n-secguard-collector" class="node-rect" x="185" y="25" width="170" height="70" />
+            <text x="270" y="53" fill="#f8fafc" font-size="13" font-weight="700" text-anchor="middle">secguard-collector</text>
+            <text x="270" y="73" fill="#94a3b8" font-size="11" text-anchor="middle">Rules + IsolationForest</text>
+          </g>
+          <g>
+            <rect id="n-rag" class="node-rect" x="400" y="25" width="155" height="70" />
+            <text x="477" y="53" fill="#f8fafc" font-size="13" font-weight="700" text-anchor="middle">MITRE RAG + Shield</text>
+            <text x="477" y="73" fill="#94a3b8" font-size="11" text-anchor="middle">Nonce + nomic-embed</text>
+          </g>
+          <g>
+            <rect id="n-secguard-hunter" class="node-rect" x="600" y="25" width="160" height="70" />
+            <text x="680" y="53" fill="#f8fafc" font-size="13" font-weight="700" text-anchor="middle">secguard-hunter</text>
+            <text x="680" y="73" fill="#94a3b8" font-size="11" text-anchor="middle">Hermes Threat Hunter</text>
+          </g>
+          <g>
+            <rect id="n-secguard-responder" class="node-rect" x="805" y="25" width="160" height="70" />
+            <text x="885" y="53" fill="#f8fafc" font-size="13" font-weight="700" text-anchor="middle">secguard-responder</text>
+            <text x="885" y="73" fill="#94a3b8" font-size="11" text-anchor="middle">Hermes Containment</text>
+          </g>
+          <g>
+            <rect id="n-secguard-reporter" class="node-rect" x="1005" y="25" width="105" height="70" />
+            <text x="1057" y="53" fill="#f8fafc" font-size="12" font-weight="700" text-anchor="middle">secguard-reporter</text>
+            <text x="1057" y="73" fill="#94a3b8" font-size="11" text-anchor="middle">MD / JSON / HTML</text>
+          </g>
+          <g>
+            <rect id="n-ollama" class="node-rect" x="600" y="152" width="380" height="56" />
+            <text x="790" y="177" fill="#c7d2fe" font-size="13" font-weight="700" text-anchor="middle">Local Ollama Inference Hub (127.0.0.1:11434)</text>
+            <text id="ollamaHubSub" x="790" y="195" fill="#94a3b8" font-size="11" text-anchor="middle">Wrapped by Hermes Agent Profiles (Gemma4:12b)</text>
+          </g>
+        </svg>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-title"><span>Hermes Agent Profiles</span><span class="subtitle" id="tokenSummary">0 tokens</span></div>
+      <div class="agents-grid" id="agentsGrid"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-title"><span>Live Task Board</span><span class="subtitle" id="taskProgress">0 / 6 tasks</span></div>
+      <div class="kanban">
+        <div class="col"><h3>Queued</h3><div id="col-queued"></div></div>
+        <div class="col"><h3>In Progress</h3><div id="col-progress"></div></div>
+        <div class="col"><h3>Completed / Skipped</h3><div id="col-done"></div></div>
+      </div>
+    </section>
+
+    <section class="bottom-grid">
+      <div class="panel">
+        <div class="panel-title"><span>Live Hermes Stream Feed</span></div>
+        <div class="stream-log" id="streamFeed"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">
+          <span>Triage Summary &amp; Reports</span>
+          <span id="riskBadges"></span>
+        </div>
+        <div class="findings-list" id="findingsBox">
+          <p class="subtitle">Select a run or click <strong>Run Hermes Agents</strong> to inspect live findings.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const els = {
+      sampleSelect: document.getElementById('sampleSelect'),
+      historySelect: document.getElementById('historySelect'),
+      backendSelect: document.getElementById('backendSelect'),
+      modelInput: document.getElementById('modelInput'),
+      runBtn: document.getElementById('runBtn'),
+      agentsGrid: document.getElementById('agentsGrid'),
+      colQueued: document.getElementById('col-queued'),
+      colProgress: document.getElementById('col-progress'),
+      colDone: document.getElementById('col-done'),
+      streamFeed: document.getElementById('streamFeed'),
+      findingsBox: document.getElementById('findingsBox'),
+      riskBadges: document.getElementById('riskBadges'),
+      runBanner: document.getElementById('runBanner'),
+      taskProgress: document.getElementById('taskProgress'),
+      tokenSummary: document.getElementById('tokenSummary'),
+      ollamaHubSub: document.getElementById('ollamaHubSub'),
+    };
+
+    let currentSource = null;
+
+    function esc(s) {
+      return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+
+    function setNodeState(id, cls) {
+      const node = document.getElementById(id);
+      if (!node) return;
+      node.classList.remove('running', 'completed', 'error');
+      if (cls) node.classList.add(cls);
+    }
+
+    function setEdgeActive(id, active) {
+      const edge = document.getElementById(id);
+      if (!edge) return;
+      edge.classList.toggle('active', Boolean(active));
+    }
+
+    function renderState(state) {
+      els.runBanner.textContent = `${state.run_id} | ${state.backend.toUpperCase()} (${state.model}) | ${state.status.toUpperCase()}`;
+      els.ollamaHubSub.textContent = `Wrapped by Hermes Agent Profiles (${state.model})`;
+
+      // Topology updates
+      const ags = state.agents || {};
+      const tMap = Object.fromEntries((state.tasks || []).map(t => [t.id, t]));
+      setNodeState('n-logs', state.total_events > 0 ? 'completed' : '');
+      setNodeState('n-rag', tMap['TASK-03']?.status === 'in_progress' ? 'running' : (tMap['TASK-03']?.status === 'completed' ? 'completed' : ''));
+      for (const name of ['secguard-collector', 'secguard-hunter', 'secguard-responder', 'secguard-reporter']) {
+        const st = ags[name]?.status || 'idle';
+        setNodeState(`n-${name}`, st === 'idle' ? '' : st);
+      }
+      const anyLlmRunning = ['secguard-hunter', 'secguard-responder', 'secguard-reporter'].some(n => ags[n]?.status === 'running');
+      setNodeState('n-ollama', anyLlmRunning ? 'running' : (state.status === 'completed' ? 'completed' : ''));
+
+      setEdgeActive('e-logs-col', tMap['TASK-01']?.status === 'in_progress');
+      setEdgeActive('e-col-rag', tMap['TASK-02']?.status === 'in_progress' || tMap['TASK-03']?.status === 'in_progress');
+      setEdgeActive('e-rag-hun', tMap['TASK-04']?.status === 'in_progress');
+      setEdgeActive('e-hun-res', tMap['TASK-05']?.status === 'in_progress');
+      setEdgeActive('e-res-rep', tMap['TASK-06']?.status === 'in_progress');
+      setEdgeActive('e-ol-hun', ags['secguard-hunter']?.status === 'running');
+      setEdgeActive('e-ol-res', ags['secguard-responder']?.status === 'running');
+      setEdgeActive('e-ol-rep', ags['secguard-reporter']?.status === 'running');
+
+      // Agent cards
+      let totalIn = 0, totalOut = 0;
+      els.agentsGrid.innerHTML = Object.values(ags).map(a => {
+        totalIn += a.input_tokens || 0;
+        totalOut += a.output_tokens || 0;
+        return `
+          <div class="agent-card ${esc(a.status)}">
+            <div class="agent-head">
+              <span class="agent-name">${esc(a.name)}</span>
+              <span class="pill ${esc(a.status)}">${esc(a.status)}</span>
+            </div>
+            <div class="agent-meta">
+              <div><strong>Role:</strong> ${esc(a.role)}</div>
+              <div><strong>Model:</strong> ${esc(a.model || '-')}</div>
+              <div><strong>Hermes Session:</strong> <code>${esc(a.session_id || 'local')}</code></div>
+              <div><strong>Tokens:</strong> ${a.input_tokens || 0} in / ${a.output_tokens || 0} out (${a.duration_ms || 0} ms)</div>
+            </div>
+            <div class="agent-msg">${esc(a.last_message || 'Waiting for task...')}</div>
+          </div>
+        `;
+      }).join('');
+      els.tokenSummary.textContent = `${totalIn} in / ${totalOut} out tokens`;
+
+      // Kanban columns
+      const tasks = state.tasks || [];
+      const doneCount = tasks.filter(t => t.status === 'completed' || t.status === 'skipped').length;
+      els.taskProgress.textContent = `${doneCount} / ${tasks.length} tasks`;
+
+      const cardHtml = t => `
+        <div class="task-card ${esc(t.status)}">
+          <div class="task-top">
+            <span>${esc(t.id)} &bull; ${esc(t.agent)}</span>
+            <span>${t.duration_ms ? t.duration_ms + ' ms' : esc(t.status)}</span>
+          </div>
+          <div class="task-title">${esc(t.title)}</div>
+          <div class="task-summary">${esc(t.summary || t.description)}</div>
+        </div>
+      `;
+      els.colQueued.innerHTML = tasks.filter(t => t.status === 'queued').map(cardHtml).join('') || '<div class="subtitle">None</div>';
+      els.colProgress.innerHTML = tasks.filter(t => t.status === 'in_progress').map(cardHtml).join('') || '<div class="subtitle">None</div>';
+      els.colDone.innerHTML = tasks.filter(t => ['completed','skipped','failed'].includes(t.status)).map(cardHtml).join('') || '<div class="subtitle">None</div>';
+
+      // Stream feed
+      els.streamFeed.innerHTML = (state.events || []).map(ev => {
+        const ts = (ev.timestamp || '').slice(11, 19);
+        return `<div class="log-row"><span class="log-ts">[${esc(ts)}]</span><span class="log-ag">${esc(ev.agent)}</span><span>${esc(ev.message)}</span></div>`;
+      }).join('');
+      els.streamFeed.scrollTop = els.streamFeed.scrollHeight;
+
+      // Findings & report links
+      const injBadge = state.prompt_injection_detected ? `<span class="pill shield">INJECTION SHIELDED</span>` : '';
+      els.riskBadges.innerHTML = `<span class="pill ${esc(state.overall_risk)}">${esc(state.overall_risk)}</span> <span class="pill">${esc(state.verdict)}</span> ${injBadge}`;
+
+      const mitreHtml = (state.mitre_techniques || []).map(m => `<span class="tag">${esc(m)}</span>`).join('') || '<span class="subtitle">None</span>';
+      const iocsHtml = (state.iocs || []).map(i => `<span class="tag">${esc(i)}</span>`).join('') || '<span class="subtitle">None</span>';
+      const actionsHtml = (state.recommended_actions || []).slice(0, 5).map(a => `<li>${esc(a)}</li>`).join('') || '<li>None</li>';
+      const repLinks = Object.keys(state.report_files || {}).map(fmt =>
+        `<a href="/api/runs/${encodeURIComponent(state.run_id)}/report/${encodeURIComponent(fmt)}" target="_blank">Open ${fmt.toUpperCase()} Report</a>`
+      ).join('');
+
+      els.findingsBox.innerHTML = `
+        <p><strong>Events:</strong> ${state.total_events} | <strong>Alerts:</strong> ${state.total_alerts} | <strong>Incidents:</strong> ${state.total_incidents}</p>
+        <p>${esc(state.executive_summary || (state.error ? 'Error: ' + state.error : 'Analysis in progress...'))}</p>
+        <div><strong>MITRE ATT&amp;CK:</strong><br/>${mitreHtml}</div>
+        <div style="margin-top:0.5rem;"><strong>IOCs:</strong><br/>${iocsHtml}</div>
+        <div style="margin-top:0.5rem;"><strong>Top Recommended Actions:</strong><ul>${actionsHtml}</ul></div>
+        <div class="report-links">${repLinks}</div>
+      `;
+    }
+
+    function watchRun(runId) {
+      if (currentSource) { currentSource.close(); currentSource = null; }
+      currentSource = new EventSource(`/api/runs/${encodeURIComponent(runId)}/stream`);
+      currentSource.addEventListener('update', evt => {
+        const st = JSON.parse(evt.data);
+        renderState(st);
+        if (st.status === 'completed' || st.status === 'failed') {
+          currentSource.close();
+          currentSource = null;
+          els.runBtn.disabled = false;
+          refreshHistory(runId);
+        }
+      });
+      currentSource.onerror = () => {
+        if (currentSource) currentSource.close();
+        els.runBtn.disabled = false;
+      };
+    }
+
+    async function refreshHistory(selectId = null) {
+      const res = await fetch('/api/runs');
+      const data = await res.json();
+      const runs = data.runs || [];
+      els.historySelect.innerHTML = '<option value="">Select run...</option>' + runs.map(r =>
+        `<option value="${esc(r.run_id)}">${esc(r.run_id)} [${esc(r.overall_risk)}] (${esc(r.model)})</option>`
+      ).join('');
+      const target = selectId || (runs[0] ? runs[0].run_id : '');
+      if (target) {
+        els.historySelect.value = target;
+        const rRes = await fetch(`/api/runs/${encodeURIComponent(target)}`);
+        if (rRes.ok) renderState(await rRes.json());
+      }
+    }
+
+    async function bootstrap() {
+      const [sRes, aRes] = await Promise.all([fetch('/api/samples'), fetch('/api/agents')]);
+      const samples = (await sRes.json()).samples || [];
+      const agentInfo = await aRes.json();
+      els.sampleSelect.innerHTML = samples.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join('');
+      if (agentInfo.hermes_model) els.modelInput.value = agentInfo.hermes_model;
+      await refreshHistory();
+    }
+
+    els.historySelect.addEventListener('change', async () => {
+      const id = els.historySelect.value;
+      if (!id) return;
+      const r = await fetch(`/api/runs/${encodeURIComponent(id)}`);
+      if (r.ok) renderState(await r.json());
+    });
+
+    els.runBtn.addEventListener('click', async () => {
+      els.runBtn.disabled = true;
+      const res = await fetch('/api/runs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          log_path: els.sampleSelect.value,
+          backend: els.backendSelect.value,
+          model: els.modelInput.value.trim() || null,
+        }),
+      });
+      if (!res.ok) {
+        els.runBtn.disabled = false;
+        alert('Failed to start run: ' + await res.text());
+        return;
+      }
+      const { run_id } = await res.json();
+      watchRun(run_id);
+    });
+
+    bootstrap();
+  </script>
+</body>
+</html>

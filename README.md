@@ -43,12 +43,17 @@ flowchart TB
         SAN["Log Sanitizer (ANSI Strip + Truncate + Nonce Delimiters)"]
     end
 
-    subgraph Inference["4. Local LLM Triage (Ollama)"]
-        OLLAMA["Ollama /api/chat (Structured JSON + Validation Retry)"]
+    subgraph HermesAgents["4. Hermes Agent Profiles Wrapping Local Ollama (127.0.0.1:11434)"]
+        HUNTER["secguard-hunter (Hermes + Gemma4:12b Threat Hunt)"]
+        RESPONDER["secguard-responder (Hermes + Gemma4:12b Containment)"]
+        REPORTER["secguard-reporter (Hermes + Gemma4:12b Briefing)"]
+        OLLAMA["Local Ollama Runtime (phi4 / Gemma4:12b / nomic-embed)"]
         GUARD["Severity & Verdict Floor Guardrails"]
     end
 
-    subgraph Outputs["5. Reports & Operations"]
+    subgraph Outputs["5. Live Task Visualizer, Reports & Operations"]
+        WEBUI["FastAPI + SSE Web UI (Animated Topology + Kanban + Stream)"]
+        TUI["Rich Live Terminal Visualizer (secguard agents run)"]
         MD["Markdown Report (.md)"]
         JSON["Structured JSON (.json)"]
         HTML["Standalone Dark HTML (.html)"]
@@ -66,13 +71,21 @@ flowchart TB
 
     CORR --> RAG
     CORR --> SAN
-    RAG --> OLLAMA
-    SAN --> OLLAMA
-    OLLAMA --> GUARD
+    RAG --> HUNTER
+    SAN --> HUNTER
+    HUNTER --> RESPONDER
+    RESPONDER --> REPORTER
+    OLLAMA -. "Wrapped via hermes -p <profile>" .- HUNTER
+    OLLAMA -. "Wrapped via hermes -p <profile>" .- RESPONDER
+    OLLAMA -. "Wrapped via hermes -p <profile>" .- REPORTER
+    REPORTER --> GUARD
 
     GUARD --> MD
     GUARD --> JSON
     GUARD --> HTML
+    HUNTER -. "SSE / Rich Live Events" .-> WEBUI
+    RESPONDER -. "SSE / Rich Live Events" .-> WEBUI
+    REPORTER -. "SSE / Rich Live Events" .-> TUI
     OPS -. "Tails logs & handles rotation" .-> PARSE
 ```
 
@@ -135,9 +148,12 @@ sequenceDiagram
 | **MITRE ATT&CK RAG** | [`src/secguard/rag/retriever.py`](src/secguard/rag/retriever.py) | Embeds [16 curated Linux ATT&CK entries](src/secguard/rag/mitre_kb.json) via Ollama `nomic-embed-text:latest` with disk vector caching and offline keyword fallback. |
 | **Log Sanitizer** | [`src/secguard/llm/sanitizer.py`](src/secguard/llm/sanitizer.py) | Strips ANSI/control characters, truncates oversized lines, and wraps evidence in randomized `<<<UNTRUSTED_LOG_EVIDENCE_<hex>>>` delimiters. |
 | **Ollama Client** | [`src/secguard/llm/ollama_client.py`](src/secguard/llm/ollama_client.py) | Calls `/api/tags` and `/api/chat` with `format: "json"`, `think: false` (plus HTTP 400 fallback), schema validation retry, and token/latency telemetry. |
-| **Triage Orchestrator** | [`src/secguard/llm/triage.py`](src/secguard/llm/triage.py) | Runs rules + ML + correlation + RAG + LLM (or deterministic `--no-llm` mode) with verdict/severity guardrails. |
+| **Triage Orchestrator** | [`src/secguard/llm/triage.py`](src/secguard/llm/triage.py) | Single-pass rules + ML + correlation + RAG + LLM (or deterministic `--no-llm` mode) with guardrails. |
+| **Hermes Runner** | [`src/secguard/agents/hermes_runner.py`](src/secguard/agents/hermes_runner.py) | Creates/manages the 4 Hermes profiles (`SOUL.md` + `ollama-launch`) and streams `hermes chat --format stream-json`. |
+| **Multi-Agent Orchestrator** | [`src/secguard/agents/orchestrator.py`](src/secguard/agents/orchestrator.py) | Coordinates `TASK-01..TASK-06` across `secguard-collector`, `secguard-hunter`, `secguard-responder`, and `secguard-reporter`. |
+| **Live Web Visualizer** | [`src/secguard/ui/server.py`](src/secguard/ui/server.py) | FastAPI + SSE server & interactive SVG topology + Kanban task board + stream feed (`secguard ui`). |
 | **Report Renderer** | [`src/secguard/reporting/renderer.py`](src/secguard/reporting/renderer.py) | Generates UTF-8 Markdown (`.md`), JSON (`.json`), and standalone dark-mode HTML (`.html`) reports. |
-| **CLI & Daemon** | [`src/secguard/cli.py`](src/secguard/cli.py) | Typer + Rich commands: `models`, `analyze`, `benchmark`, and `watch` (polling tailer with log-rotation detection). |
+| **CLI & Daemon** | [`src/secguard/cli.py`](src/secguard/cli.py) | Typer + Rich commands: `models`, `analyze`, `benchmark`, `watch`, `agents`, and `ui`. |
 
 ---
 
@@ -230,14 +246,21 @@ uv sync --all-extras
 # Check local Ollama connectivity & installed models
 uv run secguard models
 
+# Bootstrap the 4 Hermes agent profiles wrapped around local Ollama (Gemma4:12b)
+uv run secguard agents init
+uv run secguard agents list
+
+# Run the 4-agent Hermes workflow with live terminal task visualizer
+uv run secguard agents run samples/linux_attack_scenario.log --output-dir reports/agents_live
+
+# Launch the real-time Web UI (Animated Topology + Kanban + Live SSE Stream)
+uv run secguard ui --host 127.0.0.1 --port 8765
+
 # Fast deterministic + ML baseline check (no LLM calls)
 uv run secguard analyze samples/linux_benign_baseline.log --no-llm --output-dir reports/benign
 
-# Full hybrid analysis with MITRE RAG + default LLM (phi4:latest)
+# Full single-pass hybrid analysis with MITRE RAG + default LLM (phi4:latest)
 uv run secguard analyze samples/linux_attack_scenario.log --output-dir reports/attack
-
-# Switch model on the fly
-uv run secguard analyze samples/linux_attack_scenario.log --model Gemma4:12b --output-dir reports/attack_gemma4
 
 # Side-by-side local model benchmark (auto-unloads VRAM between models)
 uv run secguard benchmark samples/linux_attack_scenario.log --models "phi4:latest,Gemma4:12b,qwen-abliterated:latest"

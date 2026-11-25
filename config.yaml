@@ -29,3 +29,12 @@ rag:
   enabled: true
   top_k: 4
   cache_path: ".cache/mitre_kb_embeddings.json"
+
+hermes:
+  enabled: true
+  executable: "hermes"
+  provider: "ollama-launch"
+  model: "Gemma4:12b"
+  reasoning: "none"
+  timeout_seconds: 180.0
+  runs_dir: "reports/agent_runs"

@@ -5,23 +5,37 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 import typer
+import uvicorn
 from rich.console import Console
+from rich.layout import Layout
+from rich.live import Live
+from rich.panel import Panel
 from rich.table import Table
 
+from secguard.agents import (
+    AgentRunState,
+    MultiAgentOrchestrator,
+    bootstrap_hermes_profiles,
+    list_installed_hermes_profiles,
+    load_blueprints,
+)
 from secguard.config import AppConfig, load_config
 from secguard.llm.ollama_client import OllamaClient
 from secguard.llm.triage import analyze_events, analyze_log_file
 from secguard.parsers.linux_logs import parse_log_lines
 from secguard.reporting.renderer import write_reports
+from secguard.ui import create_app
 
 app = typer.Typer(
     name="secguard",
     help="Hybrid cybersecurity detection, local LLM triage, and report generation for Linux logs.",
     no_args_is_help=True,
 )
+agents_app = typer.Typer(name="agents", help="Manage and run Hermes-wrapped SecGuard agents.")
+app.add_typer(agents_app, name="agents")
 console = Console()
 
 
@@ -239,6 +253,143 @@ def watch(
         if once:
             break
         time.sleep(interval)
+
+
+def _render_live_dashboard(state: AgentRunState) -> Layout:
+    """Build a Rich Live terminal layout showing agents, tasks, and recent events."""
+    layout = Layout()
+    layout.split_column(
+        Layout(name="top", size=9),
+        Layout(name="middle", size=11),
+        Layout(name="bottom", size=9),
+    )
+
+    ag_table = Table(title=f"Hermes Agents ({state.run_id} | {state.backend}:{state.model})", expand=True)
+    ag_table.add_column("Agent", style="cyan")
+    ag_table.add_column("Role")
+    ag_table.add_column("Status")
+    ag_table.add_column("Session")
+    ag_table.add_column("Tokens (in/out)", justify="right")
+
+    for ag in state.agents.values():
+        st_color = {"idle": "dim", "running": "cyan", "completed": "green", "error": "red"}.get(ag.status, "white")
+        ag_table.add_row(
+            ag.name,
+            ag.role,
+            f"[{st_color}]{ag.status.upper()}[/{st_color}]",
+            ag.session_id or "-",
+            f"{ag.input_tokens}/{ag.output_tokens}",
+        )
+    layout["top"].update(ag_table)
+
+    t_table = Table(title="Live Task Board", expand=True)
+    t_table.add_column("ID", style="bold")
+    t_table.add_column("Agent")
+    t_table.add_column("Task")
+    t_table.add_column("Status")
+    t_table.add_column("Summary")
+
+    for t in state.tasks:
+        tc = {
+            "queued": "dim",
+            "in_progress": "cyan",
+            "completed": "green",
+            "skipped": "yellow",
+            "failed": "red",
+        }.get(t.status, "white")
+        t_table.add_row(t.id, t.agent, t.title, f"[{tc}]{t.status}[/{tc}]", (t.summary or t.description)[:70])
+    layout["middle"].update(t_table)
+
+    ev_lines = [f"[{e.timestamp.strftime('%H:%M:%S')}] {e.agent}: {e.message}" for e in state.events[-5:]]
+    layout["bottom"].update(Panel("\n".join(ev_lines) or "Starting...", title="Hermes Stream Events"))
+    return layout
+
+
+@agents_app.command("init")
+def agents_init(
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Ollama model for Hermes profiles"),
+    config: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to config.yaml"),
+) -> None:
+    """Create and configure the 4 SecGuard Hermes agent profiles wrapped around Ollama."""
+    cfg = _load_cfg(config)
+    results = bootstrap_hermes_profiles(cfg, model_override=model)
+    table = Table(title="SecGuard Hermes Agent Profiles")
+    table.add_column("Profile", style="cyan")
+    table.add_column("Role")
+    table.add_column("Status")
+    table.add_column("Model")
+    table.add_column("Directory")
+    for row in results:
+        table.add_row(row["name"], row["role"], row["status"], row["model"], row["path"])
+    console.print(table)
+
+
+@agents_app.command("list")
+def agents_list(
+    config: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to config.yaml"),
+) -> None:
+    """List SecGuard agent blueprints and their local Hermes profile installation status."""
+    cfg = _load_cfg(config)
+    installed = list_installed_hermes_profiles(cfg.hermes.executable)
+    table = Table(title="SecGuard Agent Blueprints")
+    table.add_column("Agent", style="cyan")
+    table.add_column("Role")
+    table.add_column("Uses LLM", justify="center")
+    table.add_column("Hermes Profile", justify="center")
+    for bp in load_blueprints():
+        table.add_row(
+            bp.name,
+            bp.role,
+            "YES" if bp.uses_llm else "NO",
+            "INSTALLED" if bp.name in installed else "NOT INIT",
+        )
+    console.print(table)
+
+
+@agents_app.command("run")
+def agents_run(
+    log_path: Path = typer.Argument(..., exists=True, readable=True, help="Linux log file to analyze"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Override Ollama model"),
+    backend: Literal["hermes", "ollama"] = typer.Option("hermes", "--backend", "-b", help="hermes or ollama"),
+    output_dir: Path = typer.Option(Path("reports/agents"), "--output-dir", "-o", help="Report output directory"),
+    config: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to config.yaml"),
+) -> None:
+    """Run the 4-agent Hermes SOC workflow with a live terminal task visualizer."""
+    cfg = _load_cfg(config)
+    chosen_model = model or (cfg.hermes.model if backend == "hermes" else cfg.ollama.model)
+
+    with Live(console=console, refresh_per_second=4) as live:
+        def _on_update(st: AgentRunState, _ev) -> None:
+            live.update(_render_live_dashboard(st))
+
+        orch = MultiAgentOrchestrator(config=cfg, on_update=_on_update)
+        final_state = orch.run(
+            log_path=log_path,
+            output_dir=output_dir,
+            model_override=chosen_model,
+            backend=backend,
+        )
+        live.update(_render_live_dashboard(final_state))
+
+    console.print(
+        f"\n[bold]Run:[/bold] {final_state.run_id} | [bold]Risk:[/bold] {final_state.overall_risk} | "
+        f"[bold]Verdict:[/bold] {final_state.verdict} | [bold]Injection Caught:[/bold] {final_state.prompt_injection_detected}"
+    )
+    for fmt_name, fpath in final_state.report_files.items():
+        console.print(f"  -> {fmt_name.upper()}: [green]{fpath}[/green]")
+
+
+@app.command()
+def ui(
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind host"),
+    port: int = typer.Option(8765, "--port", help="Bind port"),
+    config: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to config.yaml"),
+) -> None:
+    """Launch the real-time Web UI visualizing Hermes agents, tasks, and Ollama streams."""
+    cfg = _load_cfg(config)
+    web_app = create_app(cfg)
+    console.print(f"Starting SecGuard Hermes Visualizer at [cyan]http://{host}:{port}[/cyan]")
+    uvicorn.run(web_app, host=host, port=port, log_level="info")
 
 
 if __name__ == "__main__":
